@@ -1,0 +1,6 @@
+/* src/content.css */
+.viziaudit-highlighter {
+  outline: 3px solid #00ca9a !important;
+  box-shadow: 0 0 10px rgba(0, 202, 154, 0.5) !important;
+  cursor: crosshair !important;
+}

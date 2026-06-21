@@ -1,0 +1,48 @@
+{
+  "publisher": "saad",
+  "name": "viziaudit",
+  "displayName": "ViziAudit: AI Frontend Auditor",
+  "description": "AI-powered frontend auditing and bug-reporting tool for modern web frameworks.",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onLanguage:html",
+    "onLanguage:css",
+    "onLanguage:javascript",
+    "onLanguage:javascriptreact",
+    "onLanguage:typescriptreact"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "viziaudit.auditFile",
+        "title": "ViziAudit: Audit Current File"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "viziaudit.auditFile",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.9.3"
+  }
+}

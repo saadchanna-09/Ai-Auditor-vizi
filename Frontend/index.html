@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ViziAudit Web Workspace - Live AI Layout Audit</title>
+    <style>
+        :root {
+            --bg-dark: #0b0f19;
+            --bg-card: #151d30;
+            --primary: #00cf91;
+            --primary-hover: #00b57e;
+            --text-main: #f3f4f6;
+            --text-muted: #9ca3af;
+            --critical: #ef4444;
+            --warning: #f59e0b;
+            --suggestion: #3b82f6;
+            --border: #24324f;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            min-height: 100vh;
+            padding: 40px 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .container {
+            max-width: 1100px;
+            width: 100%;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            color: var(--text-main);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+
+        header p {
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .workspace-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.3);
+            margin-bottom: 30px;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid var(--border);
+            margin-bottom: 25px;
+            gap: 20px;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+        }
+
+        .tab.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .input-group {
+            margin-bottom: 20px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: var(--text-main);
+        }
+
+        .input-control {
+            width: 100%;
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-main);
+            padding: 14px;
+            font-size: 1rem;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .input-control:focus {
+            border-color: var(--primary);
+        }
+
+        textarea.input-control {
+            min-height: 250px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 0.95rem;
+            resize: vertical;
+        }
+
+        .btn {
+            width: 100%;
+            background-color: var(--primary);
+            color: #000;
+            border: none;
+            padding: 15px;
+            font-size: 1.1rem;
+            font-weight: 700;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .btn:hover {
+            background-color: var(--primary-hover);
+        }
+
+        .btn:disabled {
+            background-color: var(--border);
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        .metrics-grid {
+            display: none;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            margin-top: 25px;
+        }
+
+        .metric-card {
+            background: var(--bg-dark);
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border-top: 4px solid var(--border);
+        }
+
+        .metric-card.crit { border-top-color: var(--critical); }
+        .metric-card.warn { border-top-color: var(--warning); }
+        .metric-card.sug { border-top-color: var(--suggestion); }
+
+        .metric-card h4 { font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 5px; }
+        .metric-card p { font-size: 1.8rem; font-weight: bold; }
+
+        .reports-container {
+            margin-top: 10px;
+        }
+
+        .issue-card {
+            background-color: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        .issue-card.critical { border-left-color: var(--critical); }
+        .issue-card.warning { border-left-color: var(--warning); }
+        .issue-card.suggestion { border-left-color: var(--suggestion); }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 8px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            border-radius: 4px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .badge.critical { background-color: rgba(239, 68, 68, 0.2); color: var(--critical); }
+        .badge.warning { background-color: rgba(245, 158, 11, 0.2); color: var(--warning); }
+        .badge.suggestion { background-color: rgba(59, 130, 246, 0.2); color: var(--suggestion); }
+
+        .issue-card h3 { font-size: 1.15rem; margin-bottom: 10px; }
+        .issue-card .desc { color: var(--text-muted); margin-bottom: 15px; line-height: 1.5; }
+
+        .fix-box {
+            background-color: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 15px;
+            font-size: 0.9rem;
+        }
+
+        .fix-btn {
+            background-color: transparent;
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            padding: 8px 16px;
+            font-size: 0.9rem;
+            font-weight: 600;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .fix-btn:hover { background-color: var(--primary); color: #000; }
+        .fix-btn.applied { border-color: var(--text-muted); color: var(--text-muted); cursor: not-allowed; background-color: transparent; }
+
+        .spinner {
+            border: 3px solid rgba(255,255,255,0.1);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border-left-color: #000;
+            animation: spin 1s linear infinite;
+            display: none;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <header>
+            <h1>🔍 ViziAudit Web Workspace</h1>
+            <p>Live AI Layout Audit via URL Scan or Direct Token Injection</p>
+        </header>
+
+        <div class="workspace-card">
+            <div class="tabs">
+                <div class="tab" onclick="switchTab('url-tab')">🌐 Scan Live Website URL</div>
+                <div class="tab active" onclick="switchTab('code-tab')">💻 Paste Source Code Stream</div>
+            </div>
+
+            <div id="url-tab" class="tab-content">
+                <div class="input-group">
+                    <label for="targetUrl">Target Domain / Endpoint URL:</label>
+                    <input type="url" id="targetUrl" class="input-control" placeholder="https://example.com/landing-page">
+                </div>
+                <button class="btn" id="scanBtn" onclick="runUrlScan()">
+                    <span class="btn-text">Run Live Visual Scan</span>
+                    <div class="spinner" id="scanSpinner"></div>
+                </button>
+            </div>
+
+            <div id="code-tab" class="tab-content active">
+                <div class="input-group">
+                    <label for="sourceCode">Paste raw HTML/CSS Template Tokens:</label>
+                    <textarea id="sourceCode" class="input-control" placeholder="<div style='width:1200px;background:red;'>Header</div>"></textarea>
+                </div>
+                <button class="btn" id="auditBtn" onclick="runCodePasteAudit()">
+                    <span class="btn-text">Compile & Audit Tokens</span>
+                    <div class="spinner" id="auditSpinner"></div>
+                </button>
+            </div>
+
+            <div class="metrics-grid" id="metricsGrid">
+                <div class="metric-card crit">
+                    <h4>Critical Issues</h4>
+                    <p id="critCount">0</p>
+                </div>
+                <div class="metric-card warn">
+                    <h4>Warnings</h4>
+                    <p id="warnCount">0</p>
+                </div>
+                <div class="metric-card sug">
+                    <h4>Suggestions</h4>
+                    <p id="sugCount">0</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="reports-container" id="reportsContainer"></div>
+    </div>
+
+    <script>
+        const API_BASE_URL = "http://localhost:5000"; 
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            
+            const activeTabElement = document.querySelector(`[onclick="switchTab('${tabId}')"]`);
+            if(activeTabElement) activeTabElement.classList.add('active');
+            document.getElementById(tabId).classList.add('active');
+        }
+
+        function setLoadingState(isLoading, mode) {
+            const btn = document.getElementById(mode === 'url' ? 'scanBtn' : 'auditBtn');
+            const spinner = document.getElementById(mode === 'url' ? 'scanSpinner' : 'auditSpinner');
+            const btnText = btn.querySelector('.btn-text') || btn;
+
+            if (isLoading) {
+                btn.disabled = true;
+                spinner.style.display = 'block';
+                btnText.innerText = mode === 'url' ? 'Scraping & Analysing DOM...' : 'Analyzing Layout...';
+            } else {
+                btn.disabled = false;
+                spinner.style.display = 'none';
+                btnText.innerText = mode === 'url' ? 'Run Live Visual Scan' : 'Compile & Audit Tokens';
+            }
+        }
+
+        function runCodePasteAudit() {
+            const codeInput = document.getElementById('sourceCode').value.trim();
+            if (!codeInput) {
+                alert("Please inject code tokens before building compilation matrix.");
+                return;
+            }
+            processAuditStream(codeInput, "code");
+        }
+
+        async function runUrlScan() {
+            const urlInput = document.getElementById('targetUrl').value.trim();
+            if (!urlInput) {
+                alert("Please enter a valid target URL endpoint.");
+                return;
+            }
+            processAuditStream(urlInput, "url");
+        }
+
+        async function processAuditStream(payload, mode) {
+            setLoadingState(true, mode);
+            const container = document.getElementById('reportsContainer');
+            const metricsGrid = document.getElementById('metricsGrid');
+            container.innerHTML = ''; 
+
+            const targetEndpoint = mode === 'url' ? `${API_BASE_URL}/api/audit-url` : `${API_BASE_URL}/api/audit`;
+            
+            // 🔥 FIXED: Bulletproof payload body matching backend requirements perfectly
+            const payloadBody = mode === 'url' ? { url: payload } : { codeStream: payload, sourceCode: payload };
+
+            try {
+                const response = await fetch(targetEndpoint, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payloadBody)
+                });
+
+                const contentType = response.headers.get("content-type");
+                let data;
+
+                if (contentType && contentType.includes("application/json")) {
+                    data = await response.json();
+                } else {
+                    const rawText = await response.text();
+                    throw new Error(`Server returned status ${response.status}. Mismatch payload structure.`);
+                }
+
+                if (!response.ok) {
+                    throw new Error(data.error || data.details || `Server Error ${response.status}`);
+                }
+
+                const reportIssues = data.issues || [];
+
+                const criticalCount = reportIssues.filter(i => i.severity?.toLowerCase() === 'high' || i.severity?.toLowerCase() === 'critical').length;
+                const warningCount = reportIssues.filter(i => i.severity?.toLowerCase() === 'medium' || i.severity?.toLowerCase() === 'warning').length;
+                const suggestionCount = reportIssues.filter(i => i.severity?.toLowerCase() === 'low' || i.severity?.toLowerCase() === 'suggestion').length;
+
+                document.getElementById('critCount').innerText = criticalCount;
+                document.getElementById('warnCount').innerText = warningCount;
+                document.getElementById('sugCount').innerText = suggestionCount;
+                metricsGrid.style.display = 'grid';
+
+                if (reportIssues.length > 0) {
+                    container.innerHTML = reportIssues.map((issue, index) => {
+                        let severityClass = 'suggestion';
+                        if (issue.severity?.toLowerCase() === 'high' || issue.severity?.toLowerCase() === 'critical') severityClass = 'critical';
+                        if (issue.severity?.toLowerCase() === 'medium' || issue.severity?.toLowerCase() === 'warning') severityClass = 'warning';
+
+                        const actualFixedCode = issue.fixedCode || '';
+                        const actualOldCode = issue.oldCode || '';
+
+                        const b64Old = btoa(unescape(encodeURIComponent(actualOldCode)));
+                        const b64Fixed = btoa(unescape(encodeURIComponent(actualFixedCode)));
+
+                        return `
+                        <div class="issue-card ${severityClass}" id="card-${index}">
+                            <span class="badge ${severityClass}">${issue.severity?.toUpperCase() || 'INFO'}</span>
+                            <h3>${index + 1}. [${issue.type || 'UI'}] Location: ${issue.element || 'DOM Element'}</h3>
+                            <p class="desc">${issue.description || 'Analysis trace mapping anomaly.'}</p>
+                            ${issue.fixSuggestion ? `<div class="fix-box"><strong>Suggested Solution:</strong> ${issue.fixSuggestion}</div>` : ''}
+                            
+                            <button class="fix-btn" onclick="applyWebFix('${b64Old}', '${b64Fixed}', ${index})">
+                                ⚡ Apply AI Fix
+                            </button>
+                        </div>`;
+                    }).join('');
+                } else {
+                    container.innerHTML = `<div style="text-align:center; padding: 40px; color: var(--text-muted);">🎉 Operational Excellence! Layout is perfectly dynamic and responsive.</div>`;
+                }
+
+            } catch (error) {
+                console.error("Execution Failure Trace:", error);
+                container.innerHTML = `<div style="text-align:center; padding: 30px; color: var(--critical); font-weight:bold; border: 1px dashed var(--critical); border-radius: 8px; margin-top:20px;">⚠️ Engine Error: ${error.message}</div>`;
+            } finally {
+                setLoadingState(false, mode);
+            }
+        }
+
+        function applyWebFix(b64Old, b64Fixed, elementIndex) {
+            try {
+                const oldSnippet = decodeURIComponent(escape(atob(b64Old)));
+                const fixedSnippet = decodeURIComponent(escape(atob(b64Fixed)));
+                
+                const textArea = document.getElementById('sourceCode');
+                let currentWorkspaceCode = textArea.value;
+
+                if (!oldSnippet || currentWorkspaceCode.includes(oldSnippet)) {
+                    if (oldSnippet) {
+                        currentWorkspaceCode = currentWorkspaceCode.replace(oldSnippet, fixedSnippet);
+                    } else {
+                        currentWorkspaceCode += `\n\n${fixedSnippet}`;
+                    }
+                    textArea.value = currentWorkspaceCode;
+                    
+                    const actionButton = document.querySelector(`#card-${elementIndex} .fix-btn`);
+                    if(actionButton) {
+                        actionButton.innerText = "✓ Patch Applied";
+                        actionButton.classList.add('applied');
+                        actionButton.disabled = true;
+                    }
+                    alert(`Layout optimization node ${elementIndex + 1} injected successfully into code stream.`);
+                } else {
+                    alert("Error: Target compilation block changed or signature mismatch.");
+                }
+            } catch(e) {
+                console.error("Patch Integration Error: ", e);
+                alert("Failed to compile source node token payload transformation injection.");
+            }
+        }
+    </script>
+</body>
+</html>
