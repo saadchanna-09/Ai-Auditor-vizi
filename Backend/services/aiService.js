@@ -18,32 +18,32 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
 };
 
 const executeGeminiCall = async (codeSnippet) => {
-    // 💀 UPDATED BRUTE-FORCE PROMPT
-    const systemInstruction = `
-        You are ViziAudit AI, an expert front-end compiler and UI/UX static analysis engine.
-        Analyze the provided raw HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid conflicts, and spacing bugs.
-        
-        CRITICAL RULES:
-        1. YOU MUST FIND AND REPORT at least ONE potential layout or responsive flaw, even if minor (e.g., hardcoded widths, absolute positioning, lack of responsive classes, font-sizing issues).
-        2. Reply ONLY with a valid JSON object matching this schema exactly.
-        3. Do NOT include markdown backticks like \`\`\`json. Do NOT add any conversational text.
-        
-        Response JSON Format (Schema):
-        {
-          "issues": [
+    console.log("⚡ Forcing Mock JSON Response to test Extension Webview UI!");
+    
+    // Hardcoded response direct return karega bina Gemini ko hit kiye
+    return {
+        "issues": [
             {
-              "type": "Layout Bug Type",
-              "element": "React class or Tag",
-              "severity": "critical",
-              "description": "Describe what is breaking dynamically",
-              "fixSuggestion": "How to fix it",
-              "oldCode": "the exact character snippet from codeStream that needs fixing",
-              "fixedCode": "the corrected exact snippet to replace oldCode"
+                "type": "Critical Layout Breakage",
+                "element": "div.flex",
+                "severity": "critical",
+                "description": "Hardcoded pixel width detected on parent container. This completely destroys the responsive layout on mobile screen dimensions.",
+                "fixSuggestion": "Replace style={{ width: '1000px' }} with responsive Tailwind utility classes like w-full max-w-5xl.",
+                "oldCode": "style={{ width: '1000px', height: '200px' }}",
+                "fixedCode": "className='w-full max-w-5xl h-52'"
+            },
+            {
+                "type": "Tailwind Class Conflict",
+                "element": "div.flex",
+                "severity": "warning",
+                "description": "Multiple padding utilities (class-conflict-px-4-px-8) are conflicting on the same element.",
+                "fixSuggestion": "Remove duplicate padding utility classes and keep only one standard spacing helper.",
+                "oldCode": "class-conflict-px-4-px-8 class-conflict-p-2-p-4",
+                "fixedCode": "px-4 py-2"
             }
-          ]
-        }
-    `;
-
+        ]
+    };
+};
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
         
