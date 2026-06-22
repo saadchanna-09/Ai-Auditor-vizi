@@ -22,7 +22,7 @@ export function activate(context: vscode.ExtensionContext) {
             progress.report({ increment: 10, message: "Parsing React Tokens..." });
             try {
                 // 🔥 THE PERMANENT FIX: Standard dynamic fetch request with safety headers
-                const response = await fetch('http://localhost:5000/api/audit', {
+                const response = await fetch('https://ai-auditor-vizi.vercel.app/api/audit', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -44,7 +44,7 @@ export function activate(context: vscode.ExtensionContext) {
                 console.error("Connection failed completely:", error);
                 // Fallback: Agar local network string strict ho, toh 127.0.0.1 try karein automatically
                 try {
-                    const fallbackRes = await fetch('http://127.0.0.1:5000/api/audit', {
+                    const fallbackRes = await fetch('https://ai-auditor-vizi.vercel.app/api/audit', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ sourceCode: fileText })
@@ -180,7 +180,7 @@ function getWebviewContent(fileName: string, apiData: any): string {
     <html lang="en">
     <head>
         <meta charset="UTF-8">
-        <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' http://localhost:5000 http://127.0.0.1:5000; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
+        <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'https://ai-auditor-vizi.vercel.app/api/audit; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';">
         <style>
             :root { --bg-main: #0d0e12; --bg-card: #16181d; --accent-cyan: #00ca9a; --border-color: #242930; --text-muted: #8b949e; --critical: #ff5555; --warning: #ffb86c; --info: #8be9fd; }
             body { font-family: sans-serif; padding: 24px; color: #c9d1d9; background-color: var(--bg-main); margin: 0; }
