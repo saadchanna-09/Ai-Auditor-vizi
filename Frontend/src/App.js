@@ -22,7 +22,7 @@ export default function App() {
 // ya const response = await axios.post('http://localhost:5000/api/audit', { codeStream });
 
 //  Usko badal kar aapki production Vercel URL laga dein:
-const response = await axios.post('https://viziaudit-backend.vercel.app/api/audit', {
+const response = await axios.post('https://ai-auditor-vizi.vercel.app/api/audit', {
     codeStream: codeStream // Yeh key name exact 'codeStream' hi hona chahiye
 }, {
     headers: {
