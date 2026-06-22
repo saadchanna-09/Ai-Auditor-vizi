@@ -18,43 +18,44 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
 };
 
 const executeGeminiCall = async (codeSnippet) => {
+    // 💀 UPDATED BRUTE-FORCE PROMPT
     const systemInstruction = `
         You are ViziAudit AI, an expert front-end compiler and UI/UX static analysis engine.
-        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid misalignment, and utility conflicts.
+        Analyze the provided raw HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid conflicts, and spacing bugs.
         
-        CRITICAL: You must detect any potential responsiveness issues, improper flex layouts, or bad spacing.
-        You must reply with a valid JSON object matching this schema structure exactly:
+        CRITICAL RULES:
+        1. YOU MUST FIND AND REPORT at least ONE potential layout or responsive flaw, even if minor (e.g., hardcoded widths, absolute positioning, lack of responsive classes, font-sizing issues).
+        2. Reply ONLY with a valid JSON object matching this schema exactly.
+        3. Do NOT include markdown backticks like \`\`\`json. Do NOT add any conversational text.
+        
+        Response JSON Format (Schema):
         {
           "issues": [
             {
-              "type": "Layout Bug",
-              "element": "className or tag",
-              "severity": "warning",
-              "description": "Describe what is breaking or could be better dynamically",
-              "fixSuggestion": "Provide the fix utility or style",
-              "oldCode": "the snippet that needs fixing",
-              "fixedCode": "the corrected snippet"
+              "type": "Layout Bug Type",
+              "element": "React class or Tag",
+              "severity": "critical",
+              "description": "Describe what is breaking dynamically",
+              "fixSuggestion": "How to fix it",
+              "oldCode": "the exact character snippet from codeStream that needs fixing",
+              "fixedCode": "the corrected exact snippet to replace oldCode"
             }
           ]
         }
     `;
 
     try {
-        const url = `[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$){apiKey}`;
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
         
-        // Upgraded standard request body with safety formatting
+        // 🚀 BACK TO STANDARD CONFIG FOR BRUTE FORCE
         const response = await axios.post(url, {
             contents: [
                 {
                     parts: [
-                        { text: `${systemInstruction}\n\nAnalyze this raw code snippet now:\n\n${codeSnippet}` }
+                        { text: `${systemInstruction}\n\nAnalyze this raw code stream now:\n\n${codeSnippet}` }
                     ]
                 }
-            ],
-            // 🔥 Force Gemini to return ONLY JSON
-            generationConfig: {
-                responseMimeType: "application/json"
-            }
+            ]
         }, {
             headers: { 'Content-Type': 'application/json' }
         });
@@ -64,12 +65,21 @@ const executeGeminiCall = async (codeSnippet) => {
         }
 
         let rawText = response.data.candidates[0].content.parts[0].text.trim();
-        console.log("📥 Raw Gemini Response text:", rawText); // Vercel logs mein check karne ke liye
+        console.log("📥 Raw Gemini Response text:", rawText);
+
+        // Standard markdown removal fallback
+        if (rawText.includes("```")) {
+            rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+        }
 
         return JSON.parse(rawText);
 
     } catch (e) {
-        console.log("❌ Core Error Details:", e.message);
+        if (e.response && e.response.data) {
+            console.log("❌ Raw Google API Error Payload:", JSON.stringify(e.response.data));
+        } else {
+            console.log("❌ Core Error Details:", e.message);
+        }
         return { issues: [] };
     }
 };
