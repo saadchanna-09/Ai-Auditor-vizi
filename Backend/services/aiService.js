@@ -20,31 +20,29 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
 const executeGeminiCall = async (codeSnippet) => {
     const systemInstruction = `
         You are ViziAudit AI, an expert front-end compiler and UI/UX static analysis engine.
-        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, and class utility conflicts.
+        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid misalignment, and utility conflicts.
         
-        CRITICAL: You must reply ONLY with a valid JSON object matching the schema below. 
-        Do NOT wrap the response in markdown backticks like \`\`\`json. Do NOT add any extra text, markdown, or conversation.
-        
-        Response Schema Format:
+        CRITICAL: You must detect any potential responsiveness issues, improper flex layouts, or bad spacing.
+        You must reply with a valid JSON object matching this schema structure exactly:
         {
           "issues": [
             {
-              "type": "Layout Bug Type",
-              "element": "CSS Selector or Tag Name",
-              "severity": "critical",
-              "description": "Explanation of the issue",
-              "fixSuggestion": "How to fix it",
-              "oldCode": "Exact character snippet from provided code that needs fixing",
-              "fixedCode": "The corrected exact snippet to replace oldCode"
+              "type": "Layout Bug",
+              "element": "className or tag",
+              "severity": "warning",
+              "description": "Describe what is breaking or could be better dynamically",
+              "fixSuggestion": "Provide the fix utility or style",
+              "oldCode": "the snippet that needs fixing",
+              "fixedCode": "the corrected snippet"
             }
           ]
         }
     `;
 
     try {
-        // ✅ UPGRADED TO GEMINI-1.5-PRO & STABLE ENDPOINT
-        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
+        const url = `[https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$](https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=$){apiKey}`;
         
+        // Upgraded standard request body with safety formatting
         const response = await axios.post(url, {
             contents: [
                 {
@@ -52,7 +50,11 @@ const executeGeminiCall = async (codeSnippet) => {
                         { text: `${systemInstruction}\n\nAnalyze this raw code snippet now:\n\n${codeSnippet}` }
                     ]
                 }
-            ]
+            ],
+            // 🔥 Force Gemini to return ONLY JSON
+            generationConfig: {
+                responseMimeType: "application/json"
+            }
         }, {
             headers: { 'Content-Type': 'application/json' }
         });
@@ -62,27 +64,12 @@ const executeGeminiCall = async (codeSnippet) => {
         }
 
         let rawText = response.data.candidates[0].content.parts[0].text.trim();
-        
-        if (rawText.includes("```")) {
-            rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-        }
+        console.log("📥 Raw Gemini Response text:", rawText); // Vercel logs mein check karne ke liye
 
-        const firstBrace = rawText.indexOf('{');
-        const lastBrace = rawText.lastIndexOf('}');
-        
-        if (firstBrace !== -1 && lastBrace !== -1) {
-            const cleanJsonText = rawText.substring(firstBrace, lastBrace + 1);
-            return JSON.parse(cleanJsonText);
-        }
-        
         return JSON.parse(rawText);
 
     } catch (e) {
-        if (e.response && e.response.data) {
-            console.log("❌ Raw Google API Error Payload:", JSON.stringify(e.response.data));
-        } else {
-            console.log("❌ Parsing Core Error Details:", e.message);
-        }
+        console.log("❌ Core Error Details:", e.message);
         return { issues: [] };
     }
 };
