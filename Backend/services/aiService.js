@@ -17,45 +17,46 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
     return chunks;
 };
 
-const executeGeminiCall = async (codeSnippet) => {
-    console.log("⚡ Forcing Mock JSON Response to test Extension Webview UI!");
-    
-    // Hardcoded response direct return karega bina Gemini ko hit kiye
-    return {
-        "issues": [
+import axios from 'axios';
+
+const apiKey = process.env.GEMINI_API_KEY || "YOUR_FALLBACK_KEY_IF_NEEDED";
+
+export const executeGeminiCall = async (codeSnippet) => {
+    const systemInstruction = `
+        You are ViziAudit AI, an expert front-end compiler and UI/UX static analysis engine.
+        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid misalignment, and utility conflicts.
+        
+        CRITICAL: You must detect any potential responsiveness issues, improper flex layouts, or bad spacing.
+        You must reply with a valid JSON object matching this schema structure exactly:
+        {
+          "issues": [
             {
-                "type": "Critical Layout Breakage",
-                "element": "div.flex",
-                "severity": "critical",
-                "description": "Hardcoded pixel width detected on parent container. This completely destroys the responsive layout on mobile screen dimensions.",
-                "fixSuggestion": "Replace style={{ width: '1000px' }} with responsive Tailwind utility classes like w-full max-w-5xl.",
-                "oldCode": "style={{ width: '1000px', height: '200px' }}",
-                "fixedCode": "className='w-full max-w-5xl h-52'"
-            },
-            {
-                "type": "Tailwind Class Conflict",
-                "element": "div.flex",
-                "severity": "warning",
-                "description": "Multiple padding utilities (class-conflict-px-4-px-8) are conflicting on the same element.",
-                "fixSuggestion": "Remove duplicate padding utility classes and keep only one standard spacing helper.",
-                "oldCode": "class-conflict-px-4-px-8 class-conflict-p-2-p-4",
-                "fixedCode": "px-4 py-2"
+              "type": "Layout Bug",
+              "element": "className or tag",
+              "severity": "warning",
+              "description": "Describe what is breaking or could be better dynamically",
+              "fixSuggestion": "Provide the fix utility or style",
+              "oldCode": "the snippet that needs fixing",
+              "fixedCode": "the corrected snippet"
             }
-        ]
-    };
-};
+          ]
+        }
+    `;
+
     try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
         
-        // 🚀 BACK TO STANDARD CONFIG FOR BRUTE FORCE
         const response = await axios.post(url, {
             contents: [
                 {
                     parts: [
-                        { text: `${systemInstruction}\n\nAnalyze this raw code stream now:\n\n${codeSnippet}` }
+                        { text: `${systemInstruction}\n\nAnalyze this raw code snippet now:\n\n${codeSnippet}` }
                     ]
                 }
-            ]
+            ],
+            generationConfig: {
+                responseMimeType: "application/json"
+            }
         }, {
             headers: { 'Content-Type': 'application/json' }
         });
@@ -65,21 +66,12 @@ const executeGeminiCall = async (codeSnippet) => {
         }
 
         let rawText = response.data.candidates[0].content.parts[0].text.trim();
-        console.log("📥 Raw Gemini Response text:", rawText);
-
-        // Standard markdown removal fallback
-        if (rawText.includes("```")) {
-            rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
-        }
-
+        
+        // Scope ke andar hi return ho raha hai
         return JSON.parse(rawText);
 
     } catch (e) {
-        if (e.response && e.response.data) {
-            console.log("❌ Raw Google API Error Payload:", JSON.stringify(e.response.data));
-        } else {
-            console.log("❌ Core Error Details:", e.message);
-        }
+        console.error("❌ Core Error Details:", e.message);
         return { issues: [] };
     }
 };
