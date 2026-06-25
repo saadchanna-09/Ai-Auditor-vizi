@@ -1,68 +1,76 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.activate = activate;
-// @ts-nocheck
+
 const vscode = require("vscode");
+const axios = require("axios"); // 🔥 Fetch ki jagah axios use karenge for native safety
+
 function activate(context) {
     console.log('ViziAudit Extension is now active!');
+    
     let disposable = vscode.commands.registerCommand('viziaudit.auditFile', async () => {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
             vscode.window.showErrorMessage('No active editor found!');
             return;
         }
+        
         const fileName = editor.document.fileName;
         const fileText = editor.document.getText();
         let apiData = null;
+        
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
             title: "ViziAudit Engine: Connecting to Cloud AI...",
             cancellable: false
         }, async (progress) => {
             progress.report({ increment: 10, message: "Parsing React Tokens..." });
+            
             try {
-                // 🔥 THE PERMANENT FIX: Standard dynamic fetch request with safety headers
-                const response = await fetch('https://ai-auditor-vizi.vercel.app/api/audit', {
-                    method: 'POST',
+                // 🔥 Live Vercel Call via Axios with payload matching 'codeStream'
+                const response = await axios.post('https://ai-auditor-vizi.vercel.app/api/audit', {
+                    codeStream: fileText
+                }, {
                     headers: {
                         'Content-Type': 'application/json',
                         'Accept': 'application/json'
                     },
-                    body: JSON.stringify({
-                        sourceCode: fileText
-                    })
+                    timeout: 25000 // 25 seconds timeout for Gemini Pro response
                 });
-                if (response.ok) {
-                    apiData = await response.json();
-                }
-                else {
-                    const errorText = await response.text();
-                    console.error("Backend server rejected request:", errorText);
+                
+                if (response.status === 200) {
+                    apiData = response.data;
+                } else {
+                    console.error("Backend server rejected request status:", response.status);
                     vscode.window.showWarningMessage('Backend returned an error state.');
                 }
             }
             catch (error) {
-                console.error("Connection failed completely:", error);
-                // Fallback: Agar local network string strict ho, toh 127.0.0.1 try karein automatically
+                console.error("Main Connection failed, trying fallback...", error.message);
+                
+                // Fallback Block via local or secondary check
                 try {
-                    const fallbackRes = await fetch('https://ai-auditor-vizi.vercel.app/api/audit', {
-                        method: 'POST',
+                    const fallbackRes = await axios.post('https://ai-auditor-vizi.vercel.app/api/audit', {
+                        codeStream: fileText
+                    }, {
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ sourceCode: fileText })
+                        timeout: 15000
                     });
-                    if (fallbackRes.ok) {
-                        apiData = await fallbackRes.json();
-                    }
-                    else {
+                    
+                    if (fallbackRes.status === 200) {
+                        apiData = fallbackRes.data;
+                    } else {
                         vscode.window.showErrorMessage('Backend engine error.');
                     }
                 }
                 catch (fallbackErr) {
-                    vscode.window.showErrorMessage('Failed to connect to Localhost Backend Engine.');
+                    console.error("Fallback failed too:", fallbackErr.message);
+                    vscode.window.showErrorMessage('Failed to connect to ViziAudit Cloud Engine.');
                 }
             }
         });
-        // Humesha panel load hoga, chahe data aaye ya crash ho, taake UI freeze na ho
+        
+        // Webview panel trigger setup
         const panel = vscode.window.createWebviewPanel('viziAuditReport', 'ViziAudit Engine Report', vscode.ViewColumn.Two, {
             enableScripts: true,
             enableCommandUris: true,
@@ -71,8 +79,10 @@ function activate(context) {
             ],
             retainContextWhenHidden: true
         });
+        
         panel.webview.html = getWebviewContent(fileName, apiData);
-        // 🛠️ RELIABLE MESSAGE RECEIVER FOR APPLYING FIXED TOKENS
+        
+        // Message receiver to apply inline fixes
         panel.webview.onDidReceiveMessage(async (message) => {
             if (message.command === 'applyFix') {
                 let activeEditor = vscode.window.activeTextEditor;
@@ -88,6 +98,7 @@ function activate(context) {
                     const oldCode = Buffer.from(message.oldCode, 'base64').toString('utf-8').trim();
                     const fixedCode = Buffer.from(message.fixedCode, 'base64').toString('utf-8');
                     let targetRange = null;
+                    
                     if (text.includes(oldCode)) {
                         const startIndex = text.indexOf(oldCode);
                         const startPos = activeEditor.document.positionAt(startIndex);
@@ -120,33 +131,39 @@ function activate(context) {
             }
         }, undefined, context.subscriptions);
     });
+    
     context.subscriptions.push(disposable);
 }
+
 function getWebviewContent(fileName, apiData) {
     const cleanFileName = fileName.split('\\').pop() || fileName;
     const reportIssues = apiData?.issues || [];
+    
     const criticalCount = reportIssues.filter((i) => {
         const sev = i.severity?.toLowerCase();
         return sev === 'high' || sev === 'critical';
     }).length;
+    
     const warningCount = reportIssues.filter((i) => {
         const sev = i.severity?.toLowerCase();
         return sev === 'medium' || sev === 'warning';
     }).length;
+    
     const suggestionCount = reportIssues.filter((i) => {
         const sev = i.severity?.toLowerCase();
         return sev === 'low' || sev === 'suggestion';
     }).length;
+    
     const issuesHtml = reportIssues.length > 0
         ? reportIssues.map((issue, index) => {
             let severityClass = 'suggestion';
             const currentSev = issue.severity?.toLowerCase();
-            if (currentSev === 'high' || currentSev === 'critical')
-                severityClass = 'critical';
-            if (currentSev === 'medium' || currentSev === 'warning')
-                severityClass = 'warning';
+            if (currentSev === 'high' || currentSev === 'critical') severityClass = 'critical';
+            if (currentSev === 'medium' || currentSev === 'warning') severityClass = 'warning';
+            
             const base64OldCode = Buffer.from(issue.oldCode || '').toString('base64');
             const base64FixedCode = Buffer.from(issue.fixedCode || '').toString('base64');
+            
             return `
             <div class="issue-card ${severityClass}">
                 <span class="badge ${severityClass}">${issue.severity?.toUpperCase() || 'INFO'}</span>
@@ -160,6 +177,7 @@ function getWebviewContent(fileName, apiData) {
             </div>`;
         }).join('')
         : `<div style="text-align:center; padding: 40px; color: var(--text-muted);">🎉 No anomalies detected!</div>`;
+        
     return `<!DOCTYPE html>
     <html lang="en">
     <head>
