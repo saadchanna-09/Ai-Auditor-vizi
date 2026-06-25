@@ -17,9 +17,7 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
     return chunks;
 };
 
-import axios from 'axios';
 
-const apiKey = process.env.GEMINI_API_KEY || "YOUR_FALLBACK_KEY_IF_NEEDED";
 
 export const executeGeminiCall = async (codeSnippet) => {
     const systemInstruction = `
