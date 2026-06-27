@@ -23,6 +23,11 @@ app.post("/api/audit", async (req, res) => {
 
 // 🔥 DYNAMIC PORT BINDING FOR CLOUD HOSTING
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+// 🔥 FIXED FOR VERCEL: Only listen if NOT running on Vercel
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running locally on port ${PORT}`);
+    });
+}
+
+module.exports = app;
