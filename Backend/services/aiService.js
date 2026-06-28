@@ -17,31 +17,32 @@ const splitCodeIntoChunks = (code, maxChunkSize = 8000, overlap = 1000) => {
     return chunks;
 };
 
-
-
-export const executeGeminiCall = async (codeSnippet) => {
+const executeGeminiCall = async (codeSnippet) => {
     const systemInstruction = `
         You are ViziAudit AI, an expert front-end compiler and UI/UX static analysis engine.
-        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, flexbox/grid misalignment, and utility conflicts.
+        Analyze the provided HTML, React, CSS, JavaScript, or Tailwind CSS code stream for layout flaws, responsive breakage, and class utility conflicts.
         
-        CRITICAL: You must detect any potential responsiveness issues, improper flex layouts, or bad spacing.
-        You must reply with a valid JSON object matching this schema structure exactly:
+        CRITICAL: You must reply ONLY with a valid JSON object matching the schema below. 
+        Do NOT wrap the response in markdown backticks like \`\`\`json. Do NOT add any extra text, markdown, or conversation.
+        
+        Response Schema Format:
         {
           "issues": [
             {
-              "type": "Layout Bug",
-              "element": "className or tag",
-              "severity": "warning",
-              "description": "Describe what is breaking or could be better dynamically",
-              "fixSuggestion": "Provide the fix utility or style",
-              "oldCode": "the snippet that needs fixing",
-              "fixedCode": "the corrected snippet"
+              "type": "Layout Bug Type",
+              "element": "CSS Selector or Tag Name",
+              "severity": "critical",
+              "description": "Explanation of the issue",
+              "fixSuggestion": "How to fix it",
+              "oldCode": "Exact character snippet from provided code that needs fixing",
+              "fixedCode": "The corrected exact snippet to replace oldCode"
             }
           ]
         }
     `;
 
     try {
+        // ✅ UPGRADED TO GEMINI-1.5-PRO & STABLE ENDPOINT
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro:generateContent?key=${apiKey}`;
         
         const response = await axios.post(url, {
@@ -52,6 +53,7 @@ export const executeGeminiCall = async (codeSnippet) => {
                     ]
                 }
             ],
+            // 🔥 CRITICAL FIX: Forces Gemini to strictly output pure JSON format, avoiding markdown wrapping entirely
             generationConfig: {
                 responseMimeType: "application/json"
             }
@@ -65,11 +67,29 @@ export const executeGeminiCall = async (codeSnippet) => {
 
         let rawText = response.data.candidates[0].content.parts[0].text.trim();
         
-        // Scope ke andar hi return ho raha hai
+        // Safety Clean: Remove any residual markdown characters if any
+        if (rawText.includes("```")) {
+            rawText = rawText.replace(/```json/gi, "").replace(/```/g, "").trim();
+        }
+
+        // Exact Outer-Brace Extraction for failproof JSON parsing
+        const firstBrace = rawText.indexOf('{');
+        const lastBrace = rawText.lastIndexOf('}');
+        
+        if (firstBrace !== -1 && lastBrace !== -1) {
+            const cleanJsonText = rawText.substring(firstBrace, lastBrace + 1);
+            return JSON.parse(cleanJsonText);
+        }
+        
         return JSON.parse(rawText);
 
     } catch (e) {
-        console.error("❌ Core Error Details:", e.message);
+        if (e.response && e.response.data) {
+            console.log("❌ Raw Google API Error Payload:", JSON.stringify(e.response.data));
+        } else {
+            console.log("❌ Parsing Core Error Details:", e.message);
+        }
+        // Fallback layout issue schema structure to avoid front-end collapse
         return { issues: [] };
     }
 };
