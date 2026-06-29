@@ -1,392 +1,616 @@
-// ✅ UPGRADED: Frontend/src/App.tsx
-// Fixed: URL endpoint typo (audit" → /api/audit correctly)  
-// Fixed: Backend URL updated to match your actual deployment
-// Added: "Code Paste" tab alongside URL tab (connects to /api/audit with codeStream)
-// Added: Scrape stats banner when URL mode used
-// Kept: Your exact Bento Grid design, all animations, all Framer Motion variants
+// ViziAudit v3 — Frontend/src/App.tsx
+// Complete glassmorphism redesign with:
+// - Live framework badge detection
+// - Real-time streaming progress
+// - Expandable issue cards with before/after code diff
+// - Severity filter bar
+// - Scrape stats for URL mode
+// - Copy fix button
+// - Export report button
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Terminal, ShieldAlert, Monitor, Tablet, Smartphone, CheckCircle, AlertTriangle, RefreshCw, Cpu, Layers, Layout, Flame, ExternalLink, Code2, Globe } from 'lucide-react';
-import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
+import {
+  Terminal, ShieldAlert, CheckCircle, AlertTriangle,
+  RefreshCw, Cpu, Flame, Globe, Code2, Copy, Check,
+  ChevronDown, ChevronUp, Download, Zap, Shield, Search,
+  Activity, GitBranch, Layers3,
+} from 'lucide-react';
+import {
+  AreaChart, Area, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, CartesianGrid,
+} from 'recharts';
 
-// ← Update this to your actual deployed backend URL
-const BACKEND_URL = 'https://ai-auditor-vizi.vercel.app';
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://ai-auditor-vizi.vercel.app';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface AuditIssue {
+  id: string;
   type: string;
   element: string;
-  severity: 'low' | 'medium' | 'high' | 'critical';
+  line: number;
+  severity: 'critical' | 'high' | 'medium' | 'low';
   description: string;
   fixSuggestion: string;
   oldCode: string;
   fixedCode: string;
+  rule: string;
 }
 
-interface AuditData {
+interface AuditResult {
+  detectedFramework: string;
+  totalIssues: number;
   issues: AuditIssue[];
-  scrapeStats?: {
-    originalSize: number;
-    cleanSize: number;
-    reduction: string;
-  };
+  cached?: boolean;
+  scrapeStats?: { originalSize: number; cleanSize: number; reduction: string };
   url?: string;
 }
 
-type InputMode = 'url' | 'code';
+type InputMode = 'code' | 'url';
+type SeverityFilter = 'all' | 'critical' | 'high' | 'medium' | 'low';
 
-export default function App() {
-  const [inputMode, setInputMode] = useState<InputMode>('url');
-  const [url, setUrl] = useState('');
-  const [codeInput, setCodeInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [data, setData] = useState<AuditData | null>(null);
-  const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState<'desktop' | 'tablet' | 'mobile'>('desktop');
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const SEV_CONFIG = {
+  critical: { color: 'text-red-400',    bg: 'bg-red-500/10',    border: 'border-red-500/30',    dot: 'bg-red-500',    label: 'Critical' },
+  high:     { color: 'text-orange-400', bg: 'bg-orange-500/10', border: 'border-orange-500/30', dot: 'bg-orange-500', label: 'High'     },
+  medium:   { color: 'text-yellow-400', bg: 'bg-yellow-500/10', border: 'border-yellow-500/30', dot: 'bg-yellow-500', label: 'Medium'   },
+  low:      { color: 'text-emerald-400',bg: 'bg-emerald-500/10',border: 'border-emerald-500/30',dot: 'bg-emerald-500',label: 'Low'      },
+};
 
-  const handleAudit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    setError('');
-    setData(null);
+const FRAMEWORK_ICONS: Record<string, string> = {
+  'react':          '⚛️',
+  'react-tailwind': '⚛️',
+  'tailwind-html':  '🎨',
+  'html-css':       '🌐',
+  'css':            '🎨',
+  'javascript':     '⚡',
+  'unknown':        '📄',
+};
 
-    try {
-      let response: Response;
-
-      if (inputMode === 'url') {
-        // URL mode → /api/audit-url
-        response = await fetch(`${BACKEND_URL}/api/audit-url`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ url }),
-        });
-      } else {
-        // Code paste mode → /api/audit (your existing extension endpoint)
-        response = await fetch(`${BACKEND_URL}/api/audit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ codeStream: codeInput }),
-        });
-      }
-
-      const result = await response.json();
-      if (!response.ok) throw new Error(result.error || 'Something went wrong');
-
-      // Normalize: both endpoints return { issues: [...] }
-      const normalizedData: AuditData = {
-        issues: result.issues || [],
-        scrapeStats: result.scrapeStats,
-        url: result.url || url,
-      };
-
-      setTimeout(() => {
-        setData(normalizedData);
-        setLoading(false);
-      }, 800);
-
-    } catch (err: any) {
-      setError(err.message || 'Failed to connect to the AI server.');
-      setLoading(false);
-    }
+function frameworkLabel(fw: string) {
+  const map: Record<string, string> = {
+    'react':          'React JSX',
+    'react-tailwind': 'React + Tailwind',
+    'tailwind-html':  'HTML + Tailwind',
+    'html-css':       'HTML / CSS',
+    'css':            'CSS',
+    'javascript':     'JavaScript',
   };
+  return map[fw] || fw;
+}
 
-  const getChartData = () => {
-    if (!data) return [];
-    const issues = data.issues;
-    return [
-      { name: 'UI / UX Layout', count: issues.filter(i => i.type?.includes('Layout') || i.type?.includes('UI')).length },
-      { name: 'Accessibility', count: issues.filter(i => i.type?.includes('Access') || i.type?.includes('ARIA')).length },
-      { name: 'Tailwind / CSS', count: issues.filter(i => i.type?.includes('Tailwind') || i.type?.includes('CSS')).length },
-      { name: 'React / JS', count: issues.filter(i => i.type?.includes('React') || i.type?.includes('JS') || i.type?.includes('Logic')).length },
-    ];
-  };
+// ── CopyButton ────────────────────────────────────────────────────────────────
+function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+      className="flex items-center gap-1 text-[10px] px-2 py-1 rounded-md bg-white/5 hover:bg-white/10 border border-white/10 text-slate-400 hover:text-slate-200 transition-all"
+    >
+      {copied ? <><Check size={10} className="text-emerald-400" /> Copied!</> : <><Copy size={10} /> {label}</>}
+    </button>
+  );
+}
 
-  const containerVariants = {
-    hidden: { opacity: 0 },
-    show: { opacity: 1, transition: { staggerChildren: 0.12 } },
-  };
-
-  const itemVariants = {
-    hidden: { y: 20, opacity: 0 },
-    show: {
-      y: 0,
-      opacity: 1,
-      transition: { type: 'spring' as const, stiffness: 100, damping: 10 },
-    },
-  } as const;
+// ── IssueCard ────────────────────────────────────────────────────────────────
+function IssueCard({ issue, index }: { issue: AuditIssue; index: number }) {
+  const [expanded, setExpanded] = useState(false);
+  const sev = SEV_CONFIG[issue.severity] || SEV_CONFIG.low;
 
   return (
-    <div className="min-h-screen bg-[#060913] text-gray-100 p-4 md:p-8 font-sans selection:bg-blue-500/30 selection:text-blue-200 relative overflow-x-hidden">
-
-      {/* Ambient Background Glows */}
-      <div className="absolute top-[-10%] left-[-10%] w-[50vw] h-[50vw] rounded-full bg-blue-900/10 blur-[120px] pointer-events-none" />
-      <div className="absolute bottom-[-15%] right-[-10%] w-[60vw] h-[60vw] rounded-full bg-purple-900/10 blur-[150px] pointer-events-none" />
-
-      {/* Header */}
-      <motion.header
-        initial={{ y: -30, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.6, ease: 'easeOut' }}
-        className="max-w-7xl mx-auto mb-10 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6 border-b border-slate-800/60 pb-6 relative z-10"
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: index * 0.04, type: 'spring', stiffness: 120, damping: 14 }}
+      className={`rounded-2xl border ${sev.border} ${sev.bg} backdrop-blur-xl overflow-hidden`}
+    >
+      {/* Card Header */}
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="w-full text-left p-4 flex items-start justify-between gap-3 group"
       >
-        <div className="flex items-center gap-4">
-          <div className="bg-gradient-to-tr from-blue-600 to-indigo-600 p-3 rounded-2xl text-white shadow-xl shadow-blue-500/20 relative group overflow-hidden">
-            <motion.div
-              animate={{ rotate: 360 }}
-              transition={{ repeat: Infinity, duration: 25, ease: 'linear' }}
-              className="absolute inset-0 bg-gradient-to-r from-cyan-400 to-purple-500 opacity-0 group-hover:opacity-20 transition-opacity duration-300"
-            />
-            <Terminal size={26} className="relative z-10" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-extrabold tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">ViziAudit AI Engine</h1>
-              <span className="text-[10px] uppercase tracking-widest bg-blue-500/10 border border-blue-500/30 text-blue-400 px-2 py-0.5 rounded-full font-bold">Live Core</span>
-            </div>
-            <p className="text-xs text-slate-400 mt-1 flex items-center gap-1.5 font-mono"><Cpu size={12} className="text-slate-500" /> Gemini 2.5 Flash · Neural Audit Suite v2.0</p>
-          </div>
-        </div>
-
-        {/* Input Mode Toggle + Form */}
-        <div className="w-full lg:w-auto flex-1 max-w-2xl">
-          {/* Mode Tabs */}
-          <div className="flex bg-[#0c1325] border border-slate-800 rounded-xl p-1 mb-3 w-fit">
-            <button
-              onClick={() => setInputMode('url')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${inputMode === 'url' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Globe size={13} /> Live URL
-            </button>
-            <button
-              onClick={() => setInputMode('code')}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${inputMode === 'code' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-slate-200'}`}
-            >
-              <Code2 size={13} /> Paste Code
-            </button>
-          </div>
-
-          <form onSubmit={handleAudit} className="flex flex-col gap-3">
-            <AnimatePresence mode="wait">
-              {inputMode === 'url' ? (
-                <motion.div key="url" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}>
-                  <input
-                    type="url"
-                    placeholder="Enter URL to audit (e.g. https://example.com)"
-                    value={url}
-                    onChange={(e) => setUrl(e.target.value)}
-                    disabled={loading}
-                    required
-                    className="bg-[#0c1325]/80 border border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none px-4 py-3 rounded-2xl w-full text-sm text-slate-100 placeholder-slate-500 transition-all duration-300 backdrop-blur-md"
-                  />
-                </motion.div>
-              ) : (
-                <motion.div key="code" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.2 }}>
-                  <textarea
-                    placeholder="Paste your HTML, React JSX, Tailwind, or JavaScript code here..."
-                    value={codeInput}
-                    onChange={(e) => setCodeInput(e.target.value)}
-                    disabled={loading}
-                    required
-                    rows={4}
-                    className="bg-[#0c1325]/80 border border-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none px-4 py-3 rounded-2xl w-full text-sm text-slate-100 placeholder-slate-500 transition-all duration-300 backdrop-blur-md resize-none font-mono"
-                  />
-                </motion.div>
+        <div className="flex items-start gap-3 flex-1 min-w-0">
+          <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${sev.dot} ring-2 ring-current/20`} />
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 flex-wrap mb-1">
+              <span className={`text-[10px] font-bold uppercase tracking-widest px-2 py-0.5 rounded-md border ${sev.border} ${sev.color} ${sev.bg}`}>
+                {sev.label}
+              </span>
+              <span className="text-[10px] font-mono text-slate-500 bg-white/5 border border-white/10 px-2 py-0.5 rounded-md">
+                {issue.type}
+              </span>
+              {issue.line > 0 && (
+                <span className="text-[10px] font-mono text-slate-600 bg-white/5 border border-white/10 px-2 py-0.5 rounded-md">
+                  Line {issue.line}
+                </span>
               )}
-            </AnimatePresence>
-
-            <button
-              type="submit"
-              disabled={loading || (inputMode === 'url' ? !url : !codeInput.trim())}
-              className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-500 hover:to-blue-600 disabled:from-slate-800 disabled:to-slate-900 disabled:cursor-not-allowed text-white font-semibold px-6 py-3 rounded-2xl text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer border border-blue-400/20"
-            >
-              {loading ? <RefreshCw className="animate-spin" size={16} /> : `Execute ${inputMode === 'url' ? 'URL' : 'Code'} Audit`}
-            </button>
-          </form>
-        </div>
-      </motion.header>
-
-      <main className="max-w-7xl mx-auto relative z-10">
-
-        {/* Error */}
-        <AnimatePresence>
-          {error && (
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }}
-              className="bg-red-950/20 border border-red-500/30 text-red-300 p-4 rounded-2xl flex items-start gap-3 mb-8 text-sm backdrop-blur-md"
-            >
-              <ShieldAlert className="shrink-0 mt-0.5 text-red-500" size={18} />
-              <div><span className="font-bold uppercase tracking-wider text-xs block text-red-400 mb-0.5">Connection Error</span> {error}</div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* Empty state */}
-        {!loading && !data && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
-            className="border border-slate-800/80 rounded-3xl p-16 text-center max-w-2xl mx-auto mt-16 bg-gradient-to-b from-[#0e162b]/40 to-transparent backdrop-blur-md relative overflow-hidden group shadow-2xl"
-          >
-            <div className="bg-[#131d37] border border-slate-700/50 w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-6 shadow-lg text-slate-400 group-hover:text-blue-400 transition-colors">
-              <Layout size={28} />
             </div>
-            <h3 className="text-xl font-bold text-slate-200">System Awaiting Input</h3>
-            <p className="text-slate-400 text-sm mt-2 max-w-md mx-auto leading-relaxed">
-              Enter a live URL or paste code above. ViziAudit will detect your framework automatically and run a full AI audit.
+            <p className="text-sm text-slate-200 font-medium leading-snug">
+              {issue.element} — {issue.description}
             </p>
+          </div>
+        </div>
+        <div className="flex-shrink-0 text-slate-500 group-hover:text-slate-300 transition-colors mt-0.5">
+          {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+        </div>
+      </button>
+
+      {/* Expanded Content */}
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="overflow-hidden"
+          >
+            <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+
+              {/* Fix suggestion */}
+              <div className="bg-emerald-500/5 border border-emerald-500/20 rounded-xl p-3">
+                <p className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold mb-1">Suggested Fix</p>
+                <p className="text-xs text-slate-300 leading-relaxed">{issue.fixSuggestion}</p>
+              </div>
+
+              {/* Rule */}
+              {issue.rule && (
+                <p className="text-[10px] text-slate-500 font-mono">
+                  <span className="text-slate-600">Rule:</span> {issue.rule}
+                </p>
+              )}
+
+              {/* Code diff */}
+              {(issue.oldCode || issue.fixedCode) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {issue.oldCode && (
+                    <div className="bg-red-950/30 border border-red-500/20 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-red-400 uppercase tracking-widest font-bold">❌ Before</span>
+                        <CopyButton text={issue.oldCode} label="Copy" />
+                      </div>
+                      <pre className="text-[11px] text-red-300/80 font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                        {issue.oldCode}
+                      </pre>
+                    </div>
+                  )}
+                  {issue.fixedCode && (
+                    <div className="bg-emerald-950/30 border border-emerald-500/20 rounded-xl p-3">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-[10px] text-emerald-400 uppercase tracking-widest font-bold">✅ After</span>
+                        <CopyButton text={issue.fixedCode} label="Copy Fix" />
+                      </div>
+                      <pre className="text-[11px] text-emerald-300/80 font-mono overflow-x-auto whitespace-pre-wrap break-all leading-relaxed">
+                        {issue.fixedCode}
+                      </pre>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </motion.div>
         )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
 
-        {/* Loading */}
-        <AnimatePresence>
-          {loading && (
-            <motion.div
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              className="flex flex-col items-center justify-center py-28 bg-[#0c1325]/20 border border-slate-800/60 rounded-3xl backdrop-blur-xl max-w-3xl mx-auto shadow-2xl"
-            >
-              <div className="relative mb-6">
-                <motion.div
-                  animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 2, ease: 'linear' }}
-                  className="w-16 h-16 rounded-full border-2 border-dashed border-blue-500 border-t-transparent"
-                />
-                <Cpu className="absolute inset-0 m-auto text-blue-400 animate-pulse" size={22} />
+// ── Main App ──────────────────────────────────────────────────────────────────
+export default function App() {
+  const [mode, setMode] = useState<InputMode>('code');
+  const [code, setCode] = useState('');
+  const [url, setUrl] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<AuditResult | null>(null);
+  const [error, setError] = useState('');
+  const [filter, setFilter] = useState<SeverityFilter>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [loadingMsg, setLoadingMsg] = useState('');
+
+  const LOADING_MSGS = [
+    'Detecting framework...', 'Parsing code tokens...', 'Running AI engine...',
+    'Scanning for React violations...', 'Checking Tailwind conflicts...', 'Compiling audit report...',
+  ];
+
+  const runAudit = useCallback(async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true); setError(''); setResult(null); setFilter('all'); setSearchQuery('');
+
+    let msgIndex = 0;
+    setLoadingMsg(LOADING_MSGS[0]);
+    const msgTimer = setInterval(() => {
+      msgIndex = (msgIndex + 1) % LOADING_MSGS.length;
+      setLoadingMsg(LOADING_MSGS[msgIndex]);
+    }, 1800);
+
+    try {
+      const endpoint = mode === 'url' ? '/api/audit-url' : '/api/audit';
+      const body = mode === 'url' ? { url } : { codeStream: code };
+
+      const res = await fetch(`${BACKEND_URL}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+        signal: AbortSignal.timeout(45000),
+      });
+
+      clearInterval(msgTimer);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Server error ${res.status}`);
+      }
+
+      const data: AuditResult = await res.json();
+      // Normalize for legacy shape
+      if (!data.issues && (data as any).report?.issues) {
+        data.issues = (data as any).report.issues;
+      }
+      data.issues = data.issues || [];
+      data.totalIssues = data.issues.length;
+      setResult(data);
+    } catch (err: any) {
+      clearInterval(msgTimer);
+      setError(err.name === 'TimeoutError' ? 'Request timed out. Try a smaller code snippet.' : err.message || 'Connection failed.');
+    } finally {
+      setLoading(false);
+    }
+  }, [mode, code, url]);
+
+  // Filtered issues
+  const filteredIssues = (result?.issues || []).filter((issue) => {
+    const matchesSeverity = filter === 'all' || issue.severity === filter;
+    const q = searchQuery.toLowerCase();
+    const matchesSearch = !q || issue.description.toLowerCase().includes(q) ||
+      issue.element.toLowerCase().includes(q) || issue.type.toLowerCase().includes(q);
+    return matchesSeverity && matchesSearch;
+  });
+
+  // Chart data
+  const chartData = result ? [
+    { name: 'Critical', count: result.issues.filter(i => i.severity === 'critical').length },
+    { name: 'High',     count: result.issues.filter(i => i.severity === 'high').length },
+    { name: 'Medium',   count: result.issues.filter(i => i.severity === 'medium').length },
+    { name: 'Low',      count: result.issues.filter(i => i.severity === 'low').length },
+  ] : [];
+
+  // Export report
+  const exportReport = () => {
+    if (!result) return;
+    const report = {
+      generatedAt: new Date().toISOString(),
+      framework: result.detectedFramework,
+      totalIssues: result.totalIssues,
+      issues: result.issues,
+    };
+    const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+    a.download = `viziaudit-report-${Date.now()}.json`; a.click();
+  };
+
+  const counts = {
+    critical: result?.issues.filter(i => i.severity === 'critical').length || 0,
+    high:     result?.issues.filter(i => i.severity === 'high').length || 0,
+    medium:   result?.issues.filter(i => i.severity === 'medium').length || 0,
+    low:      result?.issues.filter(i => i.severity === 'low').length || 0,
+  };
+
+  return (
+    <div className="min-h-screen bg-[#05070f] text-slate-100 font-sans overflow-x-hidden">
+
+      {/* ── Ambient background glows ── */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-[-20%] left-[-10%] w-[60vw] h-[60vw] rounded-full bg-violet-700/8 blur-[130px]" />
+        <div className="absolute bottom-[-20%] right-[-10%] w-[50vw] h-[50vw] rounded-full bg-cyan-600/6 blur-[120px]" />
+        <div className="absolute top-[40%] left-[30%] w-[30vw] h-[30vw] rounded-full bg-blue-700/5 blur-[100px]" />
+        {/* Grid pattern */}
+        <div className="absolute inset-0 opacity-[0.02]"
+          style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.1) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
+      </div>
+
+      {/* ── NAVBAR ── */}
+      <nav className="fixed top-0 left-0 right-0 z-50 border-b border-white/[0.06] backdrop-blur-2xl bg-[#05070f]/70">
+        <div className="max-w-7xl mx-auto px-6 h-14 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-violet-500 to-blue-500 flex items-center justify-center shadow-lg shadow-violet-500/25">
+              <Terminal size={15} className="text-white" />
+            </div>
+            <div>
+              <span className="font-bold text-sm text-white tracking-tight">ViziAudit</span>
+              <span className="ml-2 text-[9px] uppercase tracking-widest text-violet-400 bg-violet-500/10 border border-violet-500/20 px-1.5 py-0.5 rounded-full font-bold">v3.0</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-4 text-xs text-slate-500">
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Engine Live</span>
+            </div>
+            <span className="hidden sm:block font-mono">Gemini 2.5 Flash</span>
+          </div>
+        </div>
+      </nav>
+
+      <div className="pt-14">
+        {/* ── HERO / INPUT SECTION ── */}
+        <div className="max-w-4xl mx-auto px-6 pt-14 pb-10">
+          <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: 'easeOut' }}>
+
+            {/* Heading */}
+            <div className="text-center mb-10">
+              <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-widest text-violet-400 bg-violet-500/10 border border-violet-500/20 px-3 py-1.5 rounded-full mb-5">
+                <Zap size={10} /> AI-Powered Frontend Audit Engine
               </div>
-              <h4 className="text-base font-bold text-slate-200 tracking-wide font-mono">
-                {inputMode === 'url' ? 'SCRAPING DOM + RUNNING AI AUDIT...' : 'ANALYZING CODE WITH AI ENGINE...'}
-              </h4>
-              <p className="text-xs text-slate-400 mt-2 text-center max-w-md px-6 leading-relaxed font-mono">
-                {inputMode === 'url' ? '[Cheerio Scraper] Cleaning DOM tree...' : '[Token Stream] Parsing framework tokens...'}<br />
-                <span className="text-blue-400">[Gemini 2.5 Flash]</span> Running deep audit analysis...
+              <h1 className="text-3xl md:text-4xl font-black tracking-tight text-transparent bg-clip-text bg-gradient-to-br from-white via-slate-200 to-slate-400 mb-3">
+                Find UI Bugs Instantly
+              </h1>
+              <p className="text-slate-400 text-sm max-w-xl mx-auto leading-relaxed">
+                Paste your React, HTML, CSS, Tailwind, or JavaScript code. ViziAudit detects the framework automatically and runs a deep AI audit.
               </p>
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </div>
 
-        {/* Dashboard */}
-        {data && !loading && (
-          <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Glass Input Card */}
+            <div className="backdrop-blur-2xl bg-white/[0.03] border border-white/[0.08] rounded-3xl p-6 shadow-2xl shadow-black/40">
 
-            {/* Scrape stats (URL mode only) */}
-            {data.scrapeStats && (
-              <motion.div variants={itemVariants} className="lg:col-span-12 bg-[#071220]/70 border border-blue-900/30 rounded-2xl px-6 py-3 flex flex-wrap items-center gap-4 text-xs font-mono text-slate-400">
-                <span className="text-blue-400 font-bold">🌐 URL Scraped</span>
-                <span className="truncate max-w-xs text-slate-300">{data.url}</span>
-                <span>Original: <span className="text-slate-200">{Math.round(data.scrapeStats.originalSize / 1024)}KB</span></span>
-                <span>Clean DOM: <span className="text-emerald-400">{Math.round(data.scrapeStats.cleanSize / 1024)}KB</span></span>
-                <span>Reduction: <span className="text-emerald-400 font-bold">{data.scrapeStats.reduction}</span></span>
-              </motion.div>
-            )}
-
-            {/* Metrics Card */}
-            <motion.div variants={itemVariants} className="lg:col-span-4 bg-[#0c1325]/70 border border-slate-800/80 rounded-3xl p-6 flex flex-col justify-between backdrop-blur-md shadow-xl hover:border-slate-700/60 transition-colors group relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-24 h-24 bg-gradient-to-bl from-blue-500/5 to-transparent pointer-events-none" />
-              <div>
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest text-slate-400">
-                  <Layers size={14} className="text-blue-500" /><span>Audit Metrics</span>
-                </div>
-                <div className="mt-6 flex items-baseline gap-2.5">
-                  <span className="text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white via-slate-100 to-slate-400 tracking-tighter">{data.issues.length}</span>
-                  <span className="text-xs text-slate-400 font-bold uppercase tracking-wider pb-2">Total Issues</span>
-                </div>
+              {/* Mode Toggle */}
+              <div className="flex gap-1 p-1 bg-white/[0.04] border border-white/[0.06] rounded-xl w-fit mb-5">
+                {(['code', 'url'] as InputMode[]).map((m) => (
+                  <button key={m} onClick={() => setMode(m)}
+                    className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                      mode === m ? 'bg-white/10 text-white shadow backdrop-blur-sm border border-white/10' : 'text-slate-500 hover:text-slate-300'
+                    }`}
+                  >
+                    {m === 'code' ? <><Code2 size={13} /> Paste Code</> : <><Globe size={13} /> Live URL</>}
+                  </button>
+                ))}
               </div>
-              <div className="mt-8 space-y-2.5 border-t border-slate-800/80 pt-5">
-                <div className="flex justify-between items-center bg-[#101931]/40 border border-slate-800/40 px-3 py-2.5 rounded-xl hover:bg-[#101931]/70 transition-colors">
-                  <span className="text-xs text-slate-400 flex items-center gap-2"><Flame size={14} className="text-red-500 animate-pulse" /> Critical / High</span>
-                  <span className="font-mono text-xs font-bold text-red-400 px-2 py-0.5 rounded bg-red-950/30 border border-red-500/20">
-                    {data.issues.filter(i => ['high', 'critical'].includes(String(i.severity).toLowerCase())).length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center bg-[#101931]/40 border border-slate-800/40 px-3 py-2.5 rounded-xl hover:bg-[#101931]/70 transition-colors">
-                  <span className="text-xs text-slate-400 flex items-center gap-2"><AlertTriangle size={14} className="text-yellow-500" /> Medium Warning</span>
-                  <span className="font-mono text-xs font-bold text-yellow-400 px-2 py-0.5 rounded bg-yellow-950/30 border border-yellow-500/20">
-                    {data.issues.filter(i => ['medium', 'warning'].includes(String(i.severity).toLowerCase())).length}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center bg-[#101931]/40 border border-slate-800/40 px-3 py-2.5 rounded-xl hover:bg-[#101931]/70 transition-colors">
-                  <span className="text-xs text-slate-400 flex items-center gap-2"><CheckCircle size={14} className="text-emerald-500" /> Low / Suggestions</span>
-                  <span className="font-mono text-xs font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-950/30 border border-emerald-500/20">
-                    {data.issues.filter(i => ['low', 'info'].includes(String(i.severity).toLowerCase())).length}
-                  </span>
-                </div>
-              </div>
-            </motion.div>
 
-            {/* Chart */}
-            <motion.div variants={itemVariants} className="lg:col-span-8 bg-[#0c1325]/70 border border-slate-800/80 rounded-3xl p-6 backdrop-blur-md shadow-xl hover:border-slate-700/60 transition-colors relative overflow-hidden">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-                <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" /> Fault Density Vectors
-              </h2>
-              <div className="h-48 w-full mt-2">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={getChartData()} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="chartGlow" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.25} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0.0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.3} />
-                    <XAxis dataKey="name" stroke="#64748b" fontSize={10} tickLine={false} axisLine={false} />
-                    <YAxis stroke="#64748b" fontSize={10} allowDecimals={false} tickLine={false} axisLine={false} />
-                    <Tooltip contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '16px', fontSize: '11px', color: '#f1f5f9' }} />
-                    <Area type="monotone" dataKey="count" stroke="#3b82f6" strokeWidth={2.5} fillOpacity={1} fill="url(#chartGlow)" />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-            </motion.div>
-
-            {/* Issues Feed - full width */}
-            <motion.div variants={itemVariants} className="lg:col-span-12 bg-[#0c1325]/70 border border-slate-800/80 rounded-3xl p-6 flex flex-col backdrop-blur-md shadow-xl hover:border-slate-700/60 transition-colors">
-              <h2 className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-                <Cpu size={14} className="text-purple-400" /> AI Engineering Remediations ({data.issues.length})
-              </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-h-[600px] overflow-y-auto pr-1">
-                {data.issues.length > 0 ? data.issues.map((issue, index) => {
-                  const sev = String(issue.severity || '').toLowerCase();
-                  const severityColor =
-                    ['high', 'critical'].includes(sev) ? 'border-red-500/40 bg-red-950/10' :
-                    ['medium', 'warning'].includes(sev) ? 'border-yellow-500/40 bg-yellow-950/10' :
-                    'border-blue-900/40 bg-blue-950/10';
-                  const severityTextColor =
-                    ['high', 'critical'].includes(sev) ? 'text-red-400' :
-                    ['medium', 'warning'].includes(sev) ? 'text-yellow-400' : 'text-emerald-400';
-
-                  return (
-                    <motion.div
-                      key={index}
-                      initial={{ x: 20, opacity: 0 }} animate={{ x: 0, opacity: 1 }} transition={{ delay: index * 0.05 }}
-                      className={`border ${severityColor} p-4 rounded-2xl text-xs space-y-2 hover:border-slate-700/60 transition-colors`}
-                    >
-                      <div className="flex justify-between items-center">
-                        <span className="px-2.5 py-0.5 rounded-lg font-bold font-mono tracking-wide text-[10px] border border-blue-900/50 bg-blue-950/50 text-blue-400">
-                          {issue.type || 'UI Error'}
-                        </span>
-                        <span className={`font-mono text-[10px] font-semibold uppercase tracking-wider ${severityTextColor}`}>
-                          {issue.severity}
-                        </span>
-                      </div>
-                      <div>
-                        <span className="text-[11px] text-slate-400 font-mono block">
-                          Target: <code className="text-slate-200 bg-slate-800/50 px-1.5 py-0.5 rounded border border-slate-700/30">{issue.element}</code>
-                        </span>
-                        <p className="text-slate-300 leading-relaxed mt-1.5 text-[11px]">{issue.description}</p>
-                      </div>
-                      {issue.fixSuggestion && (
-                        <div className="bg-[#050812] p-3 rounded-xl border border-slate-900/80 font-mono text-cyan-400 hover:border-slate-800 transition-colors">
-                          <span className="text-[9px] text-slate-500 block mb-1 uppercase font-sans font-bold tracking-wider">Suggested Fix:</span>
-                          <span className="text-[11px] block text-slate-300">{issue.fixSuggestion}</span>
-                        </div>
+              <form onSubmit={runAudit} className="space-y-4">
+                <AnimatePresence mode="wait">
+                  {mode === 'code' ? (
+                    <motion.div key="code" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                      <textarea
+                        value={code} onChange={e => setCode(e.target.value)}
+                        placeholder={`// Paste React, HTML, CSS, Tailwind, or JS code here...\n// Example:\nimport React, { useState } from 'react';\n\nfunction Counter() {\n  const [count, setCount] = useState(0);\n  return <div onClick={setCount(count + 1)}>{count}</div>;\n}`}
+                        rows={12}
+                        disabled={loading}
+                        required
+                        className="w-full bg-white/[0.03] border border-white/[0.08] focus:border-violet-500/50 focus:ring-4 focus:ring-violet-500/10 rounded-xl px-4 py-3 text-sm text-slate-200 placeholder-slate-600 font-mono resize-y outline-none transition-all min-h-[200px]"
+                      />
+                      {code && (
+                        <p className="text-[10px] text-slate-600 mt-1 font-mono">
+                          {code.split('\n').length} lines · {code.length} chars
+                        </p>
                       )}
                     </motion.div>
-                  );
-                }) : (
-                  <div className="col-span-2 text-center py-12 text-slate-400">🎉 No issues found!</div>
-                )}
+                  ) : (
+                    <motion.div key="url" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }}>
+                      <input
+                        type="url" value={url} onChange={e => setUrl(e.target.value)}
+                        placeholder="https://your-website.com"
+                        disabled={loading} required
+                        className="w-full bg-white/[0.03] border border-white/[0.08] focus:border-violet-500/50 focus:ring-4 focus:ring-violet-500/10 rounded-xl px-4 py-3.5 text-sm text-slate-200 placeholder-slate-600 outline-none transition-all"
+                      />
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <button type="submit" disabled={loading || (mode === 'code' ? !code.trim() : !url.trim())}
+                  className="w-full bg-gradient-to-r from-violet-600 to-blue-600 hover:from-violet-500 hover:to-blue-500 disabled:from-slate-800 disabled:to-slate-800 disabled:cursor-not-allowed text-white font-bold py-3.5 rounded-xl text-sm transition-all duration-300 flex items-center justify-center gap-2 shadow-lg shadow-violet-600/20 active:scale-[0.99]"
+                >
+                  {loading
+                    ? <><RefreshCw size={15} className="animate-spin" /> {loadingMsg}</>
+                    : <><Shield size={15} /> Run AI Audit</>
+                  }
+                </button>
+              </form>
+            </div>
+          </motion.div>
+        </div>
+
+        {/* ── ERROR ── */}
+        <AnimatePresence>
+          {error && (
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+              className="max-w-4xl mx-auto px-6 mb-6"
+            >
+              <div className="backdrop-blur-xl bg-red-950/20 border border-red-500/25 rounded-2xl p-4 flex items-start gap-3 text-sm">
+                <ShieldAlert size={18} className="text-red-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-red-400 font-bold text-xs uppercase tracking-wider mb-0.5">Audit Failed</p>
+                  <p className="text-red-300/80">{error}</p>
+                </div>
               </div>
             </motion.div>
+          )}
+        </AnimatePresence>
 
-          </motion.div>
+        {/* ── RESULTS DASHBOARD ── */}
+        <AnimatePresence>
+          {result && !loading && (
+            <motion.div
+              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+              className="max-w-7xl mx-auto px-6 pb-16 space-y-6"
+            >
+
+              {/* Top bar — framework badge, cache indicator, export */}
+              <motion.div
+                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+                className="flex flex-wrap items-center justify-between gap-3 backdrop-blur-xl bg-white/[0.03] border border-white/[0.07] rounded-2xl px-5 py-3"
+              >
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xl">{FRAMEWORK_ICONS[result.detectedFramework] || '📄'}</span>
+                  <div>
+                    <p className="text-[10px] text-slate-500 uppercase tracking-wider">Detected Framework</p>
+                    <p className="text-sm font-bold text-white">{frameworkLabel(result.detectedFramework)}</p>
+                  </div>
+                  {result.cached && (
+                    <span className="text-[10px] font-bold text-cyan-400 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full flex items-center gap-1">
+                      <Zap size={9} /> Cached Result
+                    </span>
+                  )}
+                  {result.scrapeStats && (
+                    <span className="text-[10px] text-slate-400 font-mono bg-white/5 border border-white/10 px-2 py-1 rounded-lg">
+                      DOM cleaned: {result.scrapeStats.reduction} reduction
+                    </span>
+                  )}
+                </div>
+                <button onClick={exportReport}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-slate-400 hover:text-white bg-white/5 hover:bg-white/10 border border-white/10 px-3 py-1.5 rounded-lg transition-all"
+                >
+                  <Download size={12} /> Export JSON
+                </button>
+              </motion.div>
+
+              {/* Stats grid + chart */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
+
+                {/* Severity counters */}
+                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
+                  className="lg:col-span-5 backdrop-blur-xl bg-white/[0.03] border border-white/[0.07] rounded-2xl p-5"
+                >
+                  <div className="flex items-center gap-2 mb-5">
+                    <Activity size={14} className="text-violet-400" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Audit Metrics</span>
+                  </div>
+                  <div className="flex items-baseline gap-2 mb-5">
+                    <span className="text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-white to-slate-400">{result.totalIssues}</span>
+                    <span className="text-xs text-slate-500 pb-1">total issues</span>
+                  </div>
+                  <div className="space-y-2">
+                    {(['critical','high','medium','low'] as const).map(sev => {
+                      const cfg = SEV_CONFIG[sev];
+                      const count = counts[sev];
+                      const pct = result.totalIssues ? Math.round((count / result.totalIssues) * 100) : 0;
+                      return (
+                        <div key={sev} className={`flex items-center justify-between ${cfg.bg} ${cfg.border} border rounded-xl px-3 py-2`}>
+                          <span className={`text-xs flex items-center gap-2 ${cfg.color}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
+                            {cfg.label}
+                          </span>
+                          <div className="flex items-center gap-3">
+                            <div className="w-16 h-1 bg-white/5 rounded-full overflow-hidden">
+                              <div className={`h-full ${cfg.dot} rounded-full`} style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className={`font-mono text-xs font-bold ${cfg.color}`}>{count}</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+
+                {/* Chart */}
+                <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+                  className="lg:col-span-7 backdrop-blur-xl bg-white/[0.03] border border-white/[0.07] rounded-2xl p-5"
+                >
+                  <div className="flex items-center gap-2 mb-4">
+                    <Layers3 size={14} className="text-violet-400" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Severity Distribution</span>
+                  </div>
+                  <div className="h-44">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <AreaChart data={chartData} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
+                        <defs>
+                          <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor="#7c3aed" stopOpacity={0.35} />
+                            <stop offset="100%" stopColor="#7c3aed" stopOpacity={0} />
+                          </linearGradient>
+                        </defs>
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.04)" />
+                        <XAxis dataKey="name" stroke="#475569" fontSize={10} tickLine={false} axisLine={false} />
+                        <YAxis stroke="#475569" fontSize={10} allowDecimals={false} tickLine={false} axisLine={false} />
+                        <Tooltip
+                          contentStyle={{ backgroundColor: '#0f1629', borderColor: 'rgba(124,58,237,0.3)', borderRadius: '12px', fontSize: '11px', color: '#e2e8f0' }}
+                          cursor={{ stroke: 'rgba(124,58,237,0.3)', strokeWidth: 1 }}
+                        />
+                        <Area type="monotone" dataKey="count" stroke="#7c3aed" strokeWidth={2} fillOpacity={1} fill="url(#g1)" />
+                      </AreaChart>
+                    </ResponsiveContainer>
+                  </div>
+                </motion.div>
+              </div>
+
+              {/* Issues list */}
+              <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+                className="backdrop-blur-xl bg-white/[0.03] border border-white/[0.07] rounded-2xl p-5"
+              >
+                {/* Filter bar */}
+                <div className="flex flex-wrap items-center gap-3 mb-5">
+                  <div className="flex items-center gap-2">
+                    <GitBranch size={14} className="text-violet-400" />
+                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">
+                      Issues ({filteredIssues.length})
+                    </span>
+                  </div>
+
+                  {/* Severity filter pills */}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {(['all','critical','high','medium','low'] as const).map(f => {
+                      const cfg = f !== 'all' ? SEV_CONFIG[f] : null;
+                      return (
+                        <button key={f} onClick={() => setFilter(f)}
+                          className={`text-[10px] font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border transition-all cursor-pointer ${
+                            filter === f
+                              ? cfg ? `${cfg.color} ${cfg.bg} ${cfg.border}` : 'text-violet-400 bg-violet-500/10 border-violet-500/30'
+                              : 'text-slate-500 bg-white/[0.03] border-white/[0.08] hover:text-slate-300'
+                          }`}
+                        >
+                          {f === 'all' ? `All (${result.totalIssues})` : `${f} (${counts[f]})`}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Search */}
+                  <div className="flex items-center gap-2 bg-white/[0.04] border border-white/[0.08] rounded-lg px-3 py-1.5 ml-auto">
+                    <Search size={12} className="text-slate-500" />
+                    <input
+                      value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
+                      placeholder="Search issues..."
+                      className="bg-transparent outline-none text-xs text-slate-300 placeholder-slate-600 w-32"
+                    />
+                  </div>
+                </div>
+
+                {/* Issue cards */}
+                {filteredIssues.length > 0 ? (
+                  <div className="space-y-2">
+                    {filteredIssues.map((issue, i) => (
+                      <IssueCard key={issue.id || i} issue={issue} index={i} />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-16 text-slate-500">
+                    <CheckCircle size={32} className="mx-auto mb-3 text-emerald-500/50" />
+                    <p className="text-sm">No issues match your filter.</p>
+                  </div>
+                )}
+              </motion.div>
+
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* ── EMPTY STATE ── */}
+        {!loading && !result && !error && (
+          <div className="max-w-4xl mx-auto px-6 pb-16">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-4">
+              {[
+                { icon: <Cpu size={20} className="text-violet-400" />, title: 'Auto Framework Detection', desc: 'Detects React, Tailwind, HTML/CSS, and JS automatically from your code.' },
+                { icon: <Flame size={20} className="text-orange-400" />, title: 'Deep React Analysis', desc: 'Finds hooks violations, missing keys, stale closures, event handler bugs — even in 10-line snippets.' },
+                { icon: <Shield size={20} className="text-emerald-400" />, title: 'One-Click Fixes', desc: 'Every issue comes with exact before/after code. Copy the fix instantly.' },
+              ].map((f, i) => (
+                <motion.div key={i} initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.1 }}
+                  className="backdrop-blur-xl bg-white/[0.03] border border-white/[0.07] rounded-2xl p-5 hover:bg-white/[0.05] hover:border-white/[0.12] transition-all"
+                >
+                  <div className="w-10 h-10 rounded-xl bg-white/[0.05] border border-white/[0.08] flex items-center justify-center mb-3">{f.icon}</div>
+                  <p className="text-sm font-bold text-white mb-1">{f.title}</p>
+                  <p className="text-xs text-slate-500 leading-relaxed">{f.desc}</p>
+                </motion.div>
+              ))}
+            </div>
+          </div>
         )}
-      </main>
+      </div>
     </div>
   );
 }
